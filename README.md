@@ -7,101 +7,127 @@ Author: Vaibhav D
 ---
 
 ## Overview
-This project investigates the role of Protein Arginine Methyltransferase 5 (PRMT5) in regulating transposable elements and interferon response pathways using integrative bioinformatics approaches.  
-The study focuses on how PRMT5 inhibition influences:
-- Retrotransposon expression
-- Epigenetic regulation
-- Immune signaling pathways
+This project investigates how PRMT5 inhibition affects **transposable element (TE) expression** and associated **cellular pathways**, integrating **GSEA (pathway-level analysis)** with **TE-focused analysis (TEtranscripts and Telescope)**.
 
 ---
 
 ## Background
-PRMT5 is a key epigenetic regulator involved in histone methylation, RNA splicing, and immune modulation. Transposable elements (TEs), which constitute nearly half of the human genome, are typically silenced through epigenetic mechanisms.  
+Transposable elements constitute nearly half of the human genome and are typically epigenetically silenced. PRMT5 plays a critical role in maintaining this repression. Disruption of PRMT5 can lead to:
+- Reactivation of retrotransposons (ERVs, LINE-1)
+- Accumulation of nucleic acids
+- Potential activation of immune pathways  
 
-Disruption of PRMT5 function can:
-- Reactivate transposable elements such as endogenous retroviruses (ERVs) and LINE-1 elements
-- Trigger innate immune pathways through cytosolic nucleic acid sensing
+This study connects **TE activation with pathway-level changes** using GSEA.
 
 ---
 
 ## Objectives
-- Analyze the impact of PRMT5 inhibition on retrotransposon expression
-- Evaluate changes in interferon-related pathways
-- Identify key transposable element families and loci affected
-- Study PRMT5 binding patterns on LINE-1 elements
-- Quantify TE expression at both family and locus levels
+- Quantify differential expression of transposable elements upon PRMT5 inhibition  
+- Perform pathway-level analysis using GSEA  
+- Compare TE activation across treatments (GSK591, LLY283)  
+- Distinguish TE expression at:
+  - Family level (TEtranscripts)
+  - Locus level (Telescope)  
 
 ---
 
 ## Methodology
 
 ### Gene Set Enrichment Analysis (GSEA)
-- Dataset: GEO (GSE236930)
-- Tool: fgsea (R)
-- Gene sets: Hallmark, C2 (KEGG/Reactome), C5 (GO)
-- Focus: interferon and cell-cycle pathways
+- Dataset: GEO (GSE236930)  
+- Tool: **fgsea (R)**  
+- Gene sets:
+  - Hallmark  
+  - C2 (KEGG/Reactome)  
+  - C5 (GO)  
 
-### RNA-seq Analysis
-- Quality control: FastQC
-- Trimming: Trim Galore
-- Alignment: STAR
-- Differential expression: DESeq2
+**Approach:**
+- Differential expression using DESeq2  
+- Ranked gene list used for enrichment analysis  
+- Focus on:
+  - Interferon pathways  
+  - Cell cycle regulation  
+  - DNA repair pathways  
 
-### Transposable Element Analysis
-- Tool: TEtranscripts
-- Uses expectation-maximization to handle multi-mapped reads
-- Outputs: differential TE expression and class distribution
+---
 
-### Locus-Level TE Quantification
-- Tool: Telescope
-- Resolves multi-mapped reads to specific genomic loci
+### Transposable Element Analysis (TEtranscripts)
+- Tool: **TEtranscripts**
+- Handles multi-mapped reads using EM algorithm  
+- Outputs:
+  - TE family-level expression  
+  - Differential TE activation  
 
-### ChIP-seq Analysis
-- Tools: Bowtie2, Samtools, HOMER
-- Objective: identify PRMT5 binding on LINE-1 elements
-- Visualization: IGV
+---
 
-### Primer Design
-- Designed PRMT5 construct for FLAG-tag expression
-- In-Fusion cloning into p3XFLAG-CMV-10 vector
+### Intragenic vs Intergenic TE Classification
+- Tool: **BEDTools**
+- Classifies TE loci as intragenic or intergenic  
+- Helps identify potential regulatory interactions  
+
+---
+
+### Locus-Level TE Quantification (Telescope)
+- Tool: **Telescope**
+- Resolves **specific TE insertion sites**  
+- Uses EM algorithm for locus-level assignment  
+
+---
+
+### RNA-seq Integration
+- Alignment: STAR  
+- QC: FastQC, Trim Galore  
+- Differential expression: DESeq2  
 
 ---
 
 ## Key Results
 
-### Pathway Analysis
-**Upregulated:**
-- MYC targets
-- DNA repair
-- Cell cycle (G2M checkpoint, E2F targets)
+### GSEA Findings
+- Upregulated pathways:
+  - MYC targets  
+  - DNA repair  
+  - Cell cycle (G2M checkpoint, E2F targets)  
 
-**Downregulated:**
-- Metabolic pathways (e.g., adipogenesis)
-- Interferon response (later stages)
+- Downregulated pathways:
+  - Metabolic pathways (e.g., adipogenesis)  
+  - Interferon response (later timepoints)  
 
-### Transposable Element Activation
-- Strong upregulation of ERV1 family
-- Moderate changes in ERVL and LINE-1
-- HERV-int (ERV1) most upregulated
+---
 
-### Intragenic TE Enrichment
-- Many upregulated TEs located within gene bodies
-- Suggests roles in gene regulation and splicing
+### TE Family-Level Activation
+- Strong upregulation of **ERV1 family elements**
+- HERV-int identified as most upregulated  
+- Moderate changes in LINE-1 and ERVL  
 
-### ChIP-seq Findings
-- ~154 PRMT5 binding peaks identified
-- Binding observed on LINE-1 elements (especially older families)
+---
 
-### Locus-Level Insights
-- Most loci unchanged
-- Subset significantly altered
-- Example: L1FLnI_10p11.22u overlapping ITGB1
+### TE Genomic Context
+- Enrichment of **intragenic TEs**  
+- Suggests roles in gene regulation and transcription  
+
+---
+
+### Locus-Level Insights (Telescope)
+- Majority of LINE-1 loci unchanged  
+- Subset significantly altered  
+
+**Key example:**
+- L1FLnI_10p11.22u (overlapping *ITGB1*) upregulated  
+
+---
+
+### Comparative Analysis (LLY283 vs GSK591)
+- Distinct TE activation patterns  
+- Context-dependent regulation of LINE-1 loci  
+
+---
 
 ### Interferon Response
-- No consistent activation observed
-- Some IFN-related genes detected but not supported by GSEA
+- No consistent global activation observed  
+- IFN-related genes not supported by GSEA  
 
 ---
 
 ## Conclusion
-PRMT5 exhibits a dual regulatory role in epigenetic silencing and immune modulation. Its inhibition leads to selective activation of transposable elements and significant changes in cell-cycle and DNA repair pathways, without consistent interferon activation.
+PRMT5 inhibition results in coordinated changes at both **pathway level (GSEA)** and **transposable element level**, with strong activation of ERV1 families and selective regulation of LINE-1 loci. The lack of consistent interferon activation suggests a **complex and context-dependent relationship between TE activation and immune signaling**.
