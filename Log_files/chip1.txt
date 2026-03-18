@@ -1,0 +1,100 @@
+
+1.#to get fastq files and run a fastqc(steps 1-3)
+nohup bash -c '
+prefetch SRR8945506
+fasterq-dump SRR8945506.sra -O ~/chip1/data --split-files --threads 4
+' > ~/chip1/data/fasterq_dump1.log 2>&1 &
+2.fasterq-dump SRR8945506.sra --split-files
+3.fastqc SRR8945505_1.fastq SRR8945505_2.fastq \
+       SRR8945506_1.fastq SRR8945506_2.fastq \
+       -o fastqc
+
+4.#trimming the files
+trim_galore --paired SRR8945506_1.fastq SRR8945506_2.fastq -o ~/chip1/trim/
+
+5.#script to align, it does sequentially to not burden the server
+#!/bin/bash
+
+# First job
+bash -c "
+  bowtie2 -x /DATA1/genomes/hg38/bowtie2-indexes/hg38 \
+    -1 SRR8945505_1_val_1.fq -2 SRR8945505_2_val_2.fq \
+    --very-sensitive-local -k 3 --no-unal -p 10 \
+  | samtools view -bS -@ 10 - \
+  | samtools sort -@ 10 -o SRR8945505.sorted.bam - && \
+  samtools index SRR8945505.sorted.bam
+" > bowtieSRR8945505.log 2>&1
+
+# Second job 
+bash -c "
+  bowtie2 -x /DATA1/genomes/hg38/bowtie2-indexes/hg38 \
+    -1 SRR8945506_1_val_1.fq -2 SRR8945506_2_val_2.fq \
+    --very-sensitive-local -k 3 --no-unal -p 10 \
+  | samtools view -bS -@ 10 - \
+  | samtools sort -@ 10 -o SRR8945506.sorted.bam - && \
+  samtools index SRR8945506.sorted.bam
+" > bowtieSRR8945506.log 2>&1
+
+6.#To get a after align report
+samtools flagstat SRR8945505.sorted.bam > SRR8945505.flagstat.txt
+   samtools flagstat SRR8945506.sorted.bam > SRR8945506.flagstat.txt
+
+###repeat for imput file too till step 6.
+then mark duplicates and remove, as gatk tool is not available we use samtools only for marking duplicates and removing them.
+
+7.#Before we do HOMER, we are required to remove duplicates and as GATK is not there we use samtool to convert sorted .bam files to first markdup then remove marked duplicates using rmdup.
+samtools addreplacerg -r "@RG\tID:SRR8945501\tSM:SRR8945501" -o SRR8945501.rg.bam SRR8945501.sorted.bam
+   samtools sort -n -o SRR8945501.queryname.bam SRR8945501.rg.bam
+   samtools fixmate -m SRR8945501.queryname.bam SRR8945501.fixmate.bam	
+   samtools sort -o SRR8945501.fixmate.sorted.bam SRR8945501.fixmate.bam
+   samtools markdup -s SRR8945501.fixmate.sorted.bam SRR8945501.markdup.bam
+   samtools view -b -F 1024 SRR8945501.markdup.bam > SRR8945501.rmdup.bam
+   samtools index SRR8945501.rmdup.bam
+     
+8.#To get coverage files to visualise using IGV.
+bamCoverage -b SRR8945505.clean.bam -o SRR8945505.CPM.bw --binSize 10 --normalizeUsing CPM  -p 8
+   bamCoverage -b SRR8945506.clean.bam -o SRR8945506.CPM.bw --binSize 10 --normalizeUsing CPM  -p 8
+   bamCoverage -b SRR8945501.clean.bam -o SRR8945501.CPM.bw --binSize 10 --normalizeUsing CPM  -p 8
+####/opt/Homer/.//bin///homer
+
+#to clean the bam files after rmdup,remove blacklist region and low quality maps.
+samtools view -b -q 30 SRR8945501.rmdup.bam > SRR8945501.rmdup.q30.bam #keeps only map quality reads above 30
+bedtools intersect -v -a SRR8945501.rmdup.q30.bam -b hg38-blacklist.v2.bed > SRR8945501.clean.bam
+ 
+9.#to combine prmt5 replicates when creating tagdirectory.
+makeTagDirectory CHIP_dir SRR8945505.clean.bam SRR8945506.clean.bam
+makeTagDirecrory INPUT_tagdir SRR8945501.clean.bam
+
+10.#peak calling 
+findPeaks CHIP_dir -style factor -i INPUT_tagdir -o PRMT5_vs_input_peaks.txt
+
+11.#Converting .txt to .bed files
+pos2bed.pl PRMT5_vs_input_peaks.txt > PRMT5_vs_input_peaks.bed
+
+12.#this is to take only LINE/1 elements from repeatmasker file
+awk '$6=="LINE/L1"' all-LINE-list.bed > LINE1.hg38.bed
+sort -k1,1 -k2,2n LINE1.hg38.bed > LINE1.hg38.sorted.bed
+awk '{print $1"\t"$2"\t"$3"\t"$4"\t"0"\t"$5}' LINE1.hg38.sorted.bed > LINE1_homerFormat1.bed
+awk 'BEGIN{OFS="\t"} {print $1, $2, $3, $6, $5, $4}' LINE1_homerFormat1.bed > line1.bed
+
+
+13.#annotate using line1.bed created
+    annotatePeaks.pl line1.bed hg38 -d CHIP_dir INPUT_tagdir > PRMT5_LINE1_annotation.txt #I got 97k rows in this, this was a mistake instead of singalling for only LINE-1 which was there in peak, it signalled for all LINE-1 peaks that was present,irrespecitive of PRMT5.
+annotatePeaks.pl PRMT5_vs_input_peaks.bed hg38 -ann line1.bed > PRMT5_LINE1_annot.txt
+
+14.#Takes rows only which has LINE-1 annotation.
+awk -F'\t' '$9 ~ /LINE\|L1/' PRMT5_LINE1_annot.txt > PRMT5_LINE1_only.txt 
+
+15.#To add heading to PRMT5_LINE1_only.txt 
+sed -i '1i PeakID\tChr\tStart\tEnd\tStrand\tPeakScore\tFocusRatio\tAnnotation\tLINE1_Annotation\tDistance_to_TSS\tNearest_Refseq\tEntrez_ID\tNearest_Unigene\tAlternate_Refseq\tEnsembl_ID\tGene_Name\tGene_Strand\tGene_Description\tGene_Type' PRMT5_LINE1_only.txt
+
+16.# taking input file from same GSM, align,call PRMT5 combined tagdir peaks using aligned input,convert homer to bed files, annotate.pl, look for LINE1 in coulmn 9.
+
+## to call peaks using macs2 and then annotate
+macs2 callpeak -t SRR8945506.clean.bam -c SRR8945501.clean.bam -f BAM -g hs -n SRR8945506 -B -q 0.05 --keep-dup all --outdir SRR8945506_peaks
+bedtools intersect -a ~/chip1/align_coverage/SRR8945505_peaks/SRR8945501_peaks.narrowPeak -b ~/chip1/align_coverage/SRR8945506_peaks/SRR8945506_peaks.narrowPeak > combined_peaks.bed
+annotatePeaks.pl combined_peaks.bed hg38 -ann line1.bed > PRMT5_LINE1_annot1.txt
+
+
+
+	

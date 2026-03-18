@@ -1,0 +1,199 @@
+#annotation file was downloaded from 
+https://github.com/mlbendall/telescope_annotation_db/tree/master/builds/L1Base.hg38.v1  # this is only for L1 
+#1st set RNA-seq files were used from /DATA1/parijats/PRMTi/MDAMB436
+	only GSK files were used
+#2nd set RNA-seq files for MCF10A
+
+##if bulk rna seq is needed -https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE45258 #this is what I have used.
+
+###start of workflow 
+1.fasterq dump all files, using prallel-fastq-dump.
+parallel-fast-dump --sra-id SRR786500 --threads 8 --outdir ~/telescope/MDAMB436/trim/ --split-files --gzip #change SRR and outdir accordingly.
+
+2.trim using trimgallore
+trim_galore --paired SRR786500_1.fastq SRR786500_2.fastq #run in directory which has fastq.gz files.
+
+3.After trim align using bowtie2, sort and index before running the telscope.
+#!/bin/bash
+# First job
+bash -c "
+  bowtie2 -x /DATA1/genomes/hg38/bowtie2-indexes/hg38 \
+    -1 SRR786500_1_val_1.fq -2 SRR786500_2_val_2.fq \
+    --very-sensitive-local -k 50 --score-min L,0,1.6 -p 10 \
+  | samtools view -bS -@ 10 - \
+  | samtools sort -@ 10 -o SRR786500.sorted.bam - && \
+  samtools index SRR786500.sorted.bam
+" > bowtieSRR786500.log 2>&1
+# Second job 
+bash -c "
+  bowtie2 -x /DATA1/genomes/hg38/bowtie2-indexes/hg38 \
+    -1 SRR786501_1_val_1.fq -2 SRR786501_2_val_2.fq \
+    --very-sensitive-local -k 50 --score-min L,0,1.6 -p 10 \
+  | samtools view -bS -@ 10 - \
+  | samtools sort -@ 10 -o SRR786501.sorted.bam - && \
+  samtools index SRR786501.sorted.bam
+" > bowtieSRR786501.log 2>&1
+#run using nohup bash align.sh > align.log 2>&1 &
+
+->for MCFA10
+#!/bin/bash
+bash -c "
+  bowtie2 -x /DATA1/genomes/hg38/bowtie2-indexes/hg38 \
+    -1 SRR786495_1_val_1.fq -2 SRR786495_2_val_2.fq \
+    --very-sensitive-local -k 50 --score-min L,0,1.6 -p 10 \
+  | samtools view -bS -@ 10 - \
+  | samtools sort -@ 10 -o SRR786495.sorted.bam - && \
+  samtools index SRR786495.sorted.bam
+" > bowtieSRR786495.log 2>&1 &
+#run using nohup bash align.sh > align.log 2>&1 &
+
+
+# have a clean merged file for MDAMB436, samtools merge -@ 5 MDAMB436_merged.bam SRR786500.sorted.bam SRR786501.sorted.bam, not required for MCFA10 as it had only one replicate.
+
+4.Using the annotated file that was downloaded from the git repository, and input as aligned files from bowtie2. we run telescope now
+#NOTE:telescope does not work with pair-ended bam files, convert to single-ended before running.
+#when using telescope do not use '--ncpu', this arguement causes an error -"ValueError: invalid literal for int() with base 10: 'cached'."
+telescope assign LLY283_rep2.coord_single_end.bam ~/telescope/transcripts.gtf \
+  --outdir ~/tele1/tel_res/ \
+  --max_iter 100 \
+  --theta_prior 200000 \
+  --updated_sam
+#samtools view -bh -F 2308 -f 64 MDAMB436_merged.bam > MDAMB436_merged_single_end.bam# to make the bam file single ended.
+
+scp vaibhav@10.10.78.38:~/telescope/MCF10A/trim/telescope-telescope_report.tsv vaibhav@10.10.78.38:~/telescope/MCF10A/trim/telescope-checkpoint.npz /home/vaibhav11/tele1/
+
+5.Now to normalise the counts , the paper used CPM method and deseq2. Using deseq2 but design = 1, as I have only one replicate.
+# Load libraries
+library(DESeq2)
+library(readr)
+library(dplyr)
+library(tibble)
+# Read Telescope counts
+counts_MCF10A <- read_csv("MCF10A.csv") %>%
+  select(transcript, final_count) %>%
+  column_to_rownames(var="transcript")
+
+counts_MDAMB <- read_csv("MDAMB.csv") %>%
+  select(transcript, final_count) %>%
+  column_to_rownames(var="transcript")
+# Rename
+colnames(counts_MCF10A) <- "MCF10A"
+colnames(counts_MDAMB) <- "MDAMB"
+# Union of features
+all_features <- union(rownames(counts_MCF10A), rownames(counts_MDAMB))
+counts_MCF10A_full <- counts_MCF10A[all_features,, drop=FALSE]
+counts_MDAMB_full  <- counts_MDAMB[all_features,, drop=FALSE]
+counts_MCF10A_full[is.na(counts_MCF10A_full)] <- 0
+counts_MDAMB_full[is.na(counts_MDAMB_full)] <- 0
+# Combine matrix
+combined_counts <- cbind(counts_MCF10A_full, counts_MDAMB_full)
+# Metadata
+sample_info <- data.frame(
+  row.names = colnames(combined_counts),
+  cellType  = factor(c("MCF10A", "MDAMB"))
+)
+# Create DESeqDataSet (no ~cellType possible with 1 vs 1 → use ~1)
+dds <- DESeqDataSetFromMatrix(
+  countData = as.matrix(combined_counts),
+  colData   = sample_info,
+  design    = ~ 1
+)
+# Library size normalization (as in paper)
+lib_sizes <- colSums(combined_counts)
+geo_mean <- exp(mean(log(lib_sizes)))
+sizeFactors(dds) <- lib_sizes / geo_mean
+# Normalized counts
+norm_counts <- counts(dds, normalized=TRUE)
+# Compute CPM cutoff = 0.5
+cpm <- sweep(combined_counts, 2, lib_sizes/1e6, "/")
+keep <- rowSums(cpm > 0.5) > 0
+norm_counts <- norm_counts[keep, ]
+# Compute log2FC (MDAMB vs MCF10A)
+log2FC <- log2((norm_counts[, "MDAMB"] + 1) / (norm_counts[, "MCF10A"] + 1))
+# Build results
+res <- data.frame(
+  transcript = rownames(norm_counts),
+  MCF10A_norm = norm_counts[, "MCF10A"],
+  MDAMB_norm  = norm_counts[, "MDAMB"],
+  log2FoldChange = log2FC
+)
+# Filter by |log2FC| > 1 (paper used this with padj < 0.1)
+res_filtered <- subset(res, abs(log2FoldChange) > 1)
+# Save results
+write.csv(res, "MCF10A_vs_MDAMB_all.csv", row.names=FALSE)
+write.csv(res_filtered, "MCF10A_vs_MDAMB_filtered.csv", row.names=FALSE)
+# Preview
+head(res_filtered)
+
+# this builds a file even though we have only 1 replicate, but does not provide padj values due to missing replicates.
+
+6.After getting the file containing normalised and log2Foldchange, we can start plotting 
+---1.This script generated comaprision plots using log2Foldchange.
+# Load libraries
+library(ggplot2)
+library(dplyr)
+library(patchwork)   # for combining plots
+
+# Read DEG table
+deg_df <- read.csv("MCF10A_vs_MDAMB_filtered1.csv")
+
+# Histogram of log2 fold changes
+p1 <- ggplot(deg_df, aes(x = log2FoldChange)) +
+  geom_histogram(bins = 60, fill = "steelblue", alpha = 0.7) +
+  theme_minimal() +
+  xlab("Log2 Fold Change (MCF10A vs MDAMB)") +
+  ggtitle("Histogram of Log2 Fold Changes")
+
+# Add average expression for MA-like plot
+deg_df <- deg_df %>%
+  mutate(avgExp = (MCF10A_norm + MDAMB_norm) / 2)
+
+p2 <- ggplot(deg_df, aes(x = log10(avgExp + 1), y = log2FoldChange)) +
+  geom_point(alpha = 0.5) +
+  theme_minimal() +
+  xlab("Log10 Mean Normalized Expression") +
+  ylab("Log2 Fold Change") +
+  ggtitle("MA Plot-like for LINE1 Expression")
+
+# Top 10 upregulated transcripts
+top_up <- deg_df %>%
+  arrange(desc(log2FoldChange)) %>%
+  slice_head(n = 10) %>%
+  mutate(transcript = reorder(transcript, log2FoldChange))
+
+p3 <- ggplot(top_up, aes(x = transcript, y = log2FoldChange)) +
+  geom_bar(stat = "identity", fill = "coral") +
+  coord_flip() +
+  theme_minimal() +
+  xlab("LINE1 Transcript") +
+  ylab("Log2 Fold Change") +
+  ggtitle("Top 10 Upregulated LINE1 (MDAMB vs MCF10A)")
+
+# Top 10 downregulated transcripts
+top_down <- deg_df %>%
+  arrange(log2FoldChange) %>%
+  slice_head(n = 10) %>%
+  mutate(transcript = reorder(transcript, log2FoldChange))
+
+p4 <- ggplot(top_down, aes(x = transcript, y = log2FoldChange)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  coord_flip() +
+  theme_minimal() +
+  xlab("LINE1 Transcript") +
+  ylab("Log2 Fold Change") +
+  ggtitle("Top 10 Downregulated LINE1 (MCF10A vs MDAMB)")
+
+# Combine all plots into 2x2 grid
+combined_plot <- (p1 | p2) / (p3 | p4)
+
+# Save all plots into a single PDF
+ggsave("LINE1_DE_Plots.pdf", combined_plot, width = 14, height = 10)
+
+# If you also want a PNG:
+ggsave("LINE1_DE_Plots.png", combined_plot, width = 14, height = 10, dpi = 300)
+
+#To remove columsn which have 0 in normalised scores.
+awk -F',' 'NR==1 || ($2 != 0 && $3 != 0)' MCF10A_vs_MDAMB_filtered.csv > MCF10A_vs_MDAMB_filtered1.csv
+
+
+

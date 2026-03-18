@@ -1,0 +1,37 @@
+
+awk -F'\t' 'NR>1 && $1 ~ /:/ && $3 > 1 && $7 < 0.05 {print $1}' GSK_vs_DMSO_sigdiff_TEonly.txt \
+  | sed 's/:/\//g' | sort -u > up_TE_families.txt
+
+grep -F -w -f up_TE_families.txt hg38-TE-loci.bed > up_TE_loci.bed
+
+grep "HERVH" hg38-TE-loci.bed | head
+
+awk '$3 == "exon" {
+    split($9, a, ";");
+    for(i in a) {
+        if(a[i] ~ /gene_id/) g=a[i];
+        if(a[i] ~ /transcript_id/) t=a[i];
+    }
+    print $1,$4,$5,g,t,$7
+}' OFS="\t" refseq.gtf | sort -k1,1 -k2,2n > transcripts.bed
+
+bedtools intersect -a up_TE_loci.bed -b multicov.txt -wa -wb > up_TE_loci_with_counts.bed
+
+bedtools intersect -a multicov_up_instances.txt -b refseq_genes.bed -wa -wb > TE_intragenic.bed
+
+#####head -1 refseq.gtf | awk '{for(i=1;i<=NF;i++){print i,$i}}'(to check which column contains what)
+
+
+##bedtools intersect -a multicov_up_instances.txt -b refseq_transcripts.bed -wa -wb -u > TE_intragenic.bed
+##bedtools intersect -a multicov_up_instances.txt -b refseq_transcripts.bed -v -u > TE_intergenic.bed
+## echo -e "TE_chr\tTE_start\tTE_end\tTE_name\tDMSO_rep1\tDMSO_rep2\tGSK_rep1\tGSK_rep2\tGene_chr\tGene_start\tGene_end\tGene_id"     | cat - TE_intragenic_filtered.bed > TE_intragenicfil_up.bed
+
+for name in HERVH-int/LTR/ERV1 HERVL74-int/LTR/ERVL MER47C/DNA/TcMar-Tigger MER65C/LTR/ERV1 MER66B/LTR/ERV1 MER92D/LTR/ERV1 CER/Satellite/Satellite
+do
+    echo -n "$name: "
+    grep -w "$name" TE_intragenic1_up.bed | wc -l
+done
+
+##awk 'NR==FNR {a[$1]; next} $4 in a' TE.txt TE_intragenic_up.bed > TE_intragenic_filtered.bed
+
+

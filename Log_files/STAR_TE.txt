@@ -1,0 +1,49 @@
+# Directories
+FASTQ_DIR=/TE_transcript/fastq
+OUT_DIR=/TE_transcript/star_align
+GENOME_DIR=/DATA1/genomics/hg38/hg38_STAR_index
+GTF_DIR=/TE_transcript/data/refseq.gtf
+# Loop over all _1 fastq files
+for R1 in $FASTQ_DIR/*_1_val_1.fq.gz
+do
+    # Get sample prefix (remove path + _1_val_1.fq.gz)
+    sample=$(basename $R1 _1_val_1.fq.gz)
+
+    # Match corresponding R2
+    R2=$FASTQ_DIR/${sample}_2_val_2.fq.gz
+
+    echo "Running STAR for $sample ..."
+
+    STAR --runThreadN 16 \
+        --sjdbGTFfile $GTF_DIR\
+	--sjdbOverhang 100\ 
+        --genomeDir $GENOME_DIR \
+        --readFilesIn $R1 $R2 \
+        --readFilesCommand zcat \
+        --outFileNamePrefix $OUT_DIR/${sample}. \
+	--outSAMtype BAM Unsorted\
+        --outFilterMultimapNmax 100 \
+        --winAnchorMultimapNmax 200 \
+        --outSAMattributes NH HI AS nM MD XS
+
+    samtools sort -@ 12 -n -o $OUT_DIR/${sample}.nameSorted.bam \
+    $OUT_DIR/${sample}.Aligned.out.bam
+
+
+    samtools index $OUT_DIR/${sample}.nameSorted.bam
+done
+
+nohup TEtranscripts \
+  --format BAM \
+  --stranded reverse \
+  --mode multi \
+  --project GSK591_vs_DMSO \
+  --minread 1 \
+  -i 10 \
+  --padj 0.05 \
+  --GTF /home/vaibhav/rna1/data/refseq.gtf \
+  --TE /home/vaibhav/rna1/data/hg38_rmsk_TE.gtf \
+  --treatment GSK591_rep1.namesorted.bam  GSK591_rep2.namesorted.bam \
+  --control DMSO_rep1.namesorted.bam DMSO_rep2.namesorted.bam \
+  > TEtranscripts_run.log 2>&1 &
+

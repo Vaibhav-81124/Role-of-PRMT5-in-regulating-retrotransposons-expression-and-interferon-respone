@@ -1,0 +1,38 @@
+bedtools intersect -a multicov_up_instances.txt -b refseq_transcripts.bed -wa -wb -u >TE_unique.bed
+
+bedtools intersect -a TE_unique.bed -b refseq_transcripts.bed -wa -wb >TE_unique1.bed
+
+awk '{print $1,$2,$3,$4,$7,$8,$9,$10,$11,$12,$13,$14}' OFS='\t' TE_unique1.bed | sort -u > TE_unique_pairs.bed
+
+awk 'NR==FNR {a[$1]; next} $4 in a' TE.txt TE_unique1.bed > TE_filtered.bed
+
+awk '!($5==0 && $6==0 && $7==0 && $8==0)' TE_filtered.bed > TE_fil1.bed
+
+ awk 'NR>1 && ($7+$8) > ($5+$6)' TE_fil1.bed > TE_fil2.bed
+
+sort -k1,4 -k9,12 TE_fil2.bed | uniq > TE_fil3.bed
+awk '!seen[$1,$2,$3,$4,$13]++' TE_fil3.bed> TTE_fil4.bed
+
+##awk '{
+  score=$7+$8;
+  key=$4 FS $12;   # TE name + gene name
+  if(!(key in best) || score > best[key]) {
+      best[key]=score;
+      row[key]=$0;
+      order[key]=NR    # record first occurrence
+  }
+}
+END {
+  # print rows in input order based on first occurrence
+  for(k in row) print row[k]
+}' OFS="\t" TTE_fil4.bed > TTE_fil5.bed
+
+sort -k1,1V -k2,2n TTE_fil5.bed > TTE_fil5_sorted.bed
+
+echo -e "TE_chr\tTE_start\tTE_end\tTE_name\tDMSO_rep1\tDMSO_rep2\tGSK_rep1\tGSK_rep2\tGene_chr\tGene_start\tGene_end\tGene_id"     | cat - TTE_fil5_sorted.bed > TTE_fil5_sorted_h.bed
+
+for name in HERVH-int/LTR/ERV1 HERVL74-int/LTR/ERVL MER47C/DNA/TcMar-Tigger MER65C/LTR/ERV1 MER66B/LTR/ERV1 MER92D/LTR/ERV1 CER/Satellite/Satellite
+do
+    echo -n "$name: "
+    grep -w "$name" TTE_fil5_sorted.bed | wc -l
+done

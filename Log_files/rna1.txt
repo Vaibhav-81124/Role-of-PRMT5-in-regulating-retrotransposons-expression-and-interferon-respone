@@ -1,0 +1,96 @@
+1.fastqc
+#mkdir -p qc
+for p in DMSO_rep1 DMSO_rep2 GSK591_rep1 GSK591_rep2 LLY283_rep1 LLY283_rep2; do
+  fastqc -t 8 -o qc ${p}_1.fastq.gz ${p}_2.fastq.gz
+done
+
+2.Trim_galore
+#mkdir -p trimmed
+for p in DMSO_rep1 DMSO_rep2 GSK591_rep1 GSK591_rep2 LLY283_rep1 LLY283_rep2; do
+  trim_galore --paired --cores 5 \
+    ${p}_1.fastq.gz ${p}_2.fastq.gz -o trimmed
+done
+
+3.STAR alignment
+#!/bin/bash
+# Directories
+FASTQ_DIR=~/rna1/data/trimmed/
+OUT_DIR=~/rna1/STAR_align
+GENOME_DIR=~/rna1/data/hg38_STAR_index
+GTF_FILE=~/rna1/data/refseq.gtf
+
+mkdir -p $OUT_DIR
+
+# Loop over all _1 fastq files
+for R1 in $FASTQ_DIR/*_1_val_1.fq.gz
+do
+    # Get sample prefix (remove path + _1_val_1.fq.gz)
+    sample=$(basename $R1 _1_val_1.fq.gz)
+
+    # Match corresponding R2
+    R2=$FASTQ_DIR/${sample}_2_val_2.fq.gz
+
+    echo "Running STAR for $sample ..."
+
+    STAR --runThreadN 16 \
+        --genomeDir $GENOME_DIR \
+        --readFilesIn $R1 $R2 \
+        --readFilesCommand zcat \
+        --sjdbGTFfile $GTF_FILE \
+        --sjdbOverhang 100 \
+        --outFileNamePrefix $OUT_DIR/${sample}. \
+        --outSAMtype BAM SortedByCoordinate \
+        --outFilterMultimapNmax 100 \
+        --winAnchorMultimapNmax 200 \
+        --outSAMattributes NH HI AS nM MD XS
+
+    # STAR creates: ${sample}.Aligned.sortedByCoord.out.bam
+    # Make a name-sorted BAM for TEtranscripts
+    samtools sort -n -@ 12 \
+        -o $OUT_DIR/${sample}.namesorted.bam \
+        $OUT_DIR/${sample}.Aligned.sortedByCoord.out.bam
+done
+#nohup bash STAR.sh > STAR.log 2>&1 &
+
+4.#TEtranscripts(this to see Transposon expression)
+TEtranscripts \
+  --format BAM \
+  --stranded reverse \
+  --mode multi \
+  --project GSK_vs_DMSO \
+  --minread 1 \
+  -i 10 \
+  --padj 0.05 \
+  --GTF /home/vaibhav/rna1/data/refseq.gtf \
+  --TE /home/vaibhav/rna1/data/hg38_rmsk_TE.gtf \
+  --treatment ~/rna1/STAR_align/GSK591_rep1.namesorted.bam ~/rna1/STAR_align/GSK591_rep2.namesorted.bam \
+  --control ~/rna1/STAR_align/DMSO_rep1.namesorted.bam ~/rna1/STAR_align/DMSO_rep2.namesorted.bam
+###
+# ---- LLY vs DMSO ----
+TEtranscripts \
+  --format BAM \
+  --stranded reverse \
+  --mode multi \
+  --project LLY_vs_DMSO \
+  --minread 1 \
+  -i 10 \
+  --padj 0.05 \
+  --GTF /home/vaibhav/TE_transcript/data/refseq.gtf \
+  --TE /home/vaibhav/TE_transcript/data/hg38_rmsk_TE.gtf \
+  --treatment ~/rna1/STAR_align/LLY283_rep1.namesorted.bam ~/rna1/STAR_align/LLY283_rep2.namesorted.bam \
+  --control ~/rna1/STAR_align/DMSO_rep1.namesorted.bam ~/rna1/STAR_align/DMSO_rep2.namesorted.bam
+###
+# ---- Combined (GSK + LLY) vs DMSO ----
+TEtranscripts \
+  --format BAM \
+  --stranded reverse \
+  --mode multi \
+  --project Combined_vs_DMSO \
+  --minread 1 \
+  -i 10 \
+  --padj 0.05 \
+  --GTF /home/vaibhav/TE_transcript/data/refseq.gtf \
+  --TE /home/vaibhav/TE_transcript/data/hg38_rmsk_TE.gtf \
+  --treatment ~/rna1/STAR_align/GSK591_rep1.namesorted.bam ~/rna1/STAR_align/GSK591_rep2.namesorted.bam \
+             ~/rna1/STAR_align/LLY283_rep1.namesorted.bam ~/rna1/STAR_align/LLY283_rep2.namesorted.bam \
+  --control ~/rna1/STAR_align/DMSO_rep1.namesorted.bam ~/rna1/STAR_align/DMSO_rep2.namesorted.bam
